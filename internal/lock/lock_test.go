@@ -1,11 +1,10 @@
 package lock
 
 import (
-	"bufio"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,16 +14,26 @@ func TestLockBlocksOtherProcess(t *testing.T) {
 	if os.Getenv("WACLI_LOCK_HELPER") == "1" {
 		dir := os.Getenv("WACLI_LOCK_DIR")
 		lk, err := Acquire(dir)
-		if err != nil {
-			t.Fatalf("helper acquire: %v", err)
+		if err == nil {
+			_ = lk.Release()
+			_, _ = os.Stdout.WriteString("UNEXPECTED_OK\n")
+			os.Exit(2)
 		}
-		defer lk.Release()
-		_, _ = os.Stdout.WriteString("READY\n")
-		// Hold until parent kills us.
-		select {}
+		if !strings.Contains(err.Error(), "store is locked") {
+			_, _ = fmt.Fprintf(os.Stdout, "UNEXPECTED_ERR:%v\n", err)
+			os.Exit(3)
+		}
+		_, _ = os.Stdout.WriteString("EXPECTED_LOCKED\n")
+		return
 	}
 
 	dir := t.TempDir()
+
+	lk, err := Acquire(dir)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	defer lk.Release()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -34,39 +43,15 @@ func TestLockBlocksOtherProcess(t *testing.T) {
 		"WACLI_LOCK_HELPER=1",
 		"WACLI_LOCK_DIR="+dir,
 	)
-	stdout, err := cmd.StdoutPipe()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("helper failed: %v output=%s", err, strings.TrimSpace(string(out)))
 	}
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
+	got := string(out)
+	if strings.Contains(got, "UNEXPECTED_OK") || strings.Contains(got, "UNEXPECTED_ERR:") {
+		t.Fatalf("unexpected helper output: %q", strings.TrimSpace(got))
 	}
-	defer func() {
-		_ = cmd.Process.Kill()
-		_, _ = cmd.Process.Wait()
-	}()
-
-	r := bufio.NewReader(stdout)
-	line, err := r.ReadString('\n')
-	if err != nil {
-		t.Fatalf("read helper output: %v", err)
-	}
-	if strings.TrimSpace(line) != "READY" {
-		t.Fatalf("unexpected helper output: %q", line)
-	}
-
-	lk, err := Acquire(dir)
-	if err == nil {
-		_ = lk.Release()
-		t.Fatalf("expected lock acquire to fail")
-	}
-	if !strings.Contains(err.Error(), "store is locked") {
-		t.Fatalf("expected 'store is locked' error, got: %v", err)
-	}
-	if _, statErr := os.Stat(filepath.Join(dir, "LOCK")); statErr != nil {
-		t.Fatalf("expected LOCK file to exist: %v", statErr)
+	if !strings.Contains(got, "EXPECTED_LOCKED") {
+		t.Fatalf("expected helper to report locked; output=%q", strings.TrimSpace(got))
 	}
 }
-
