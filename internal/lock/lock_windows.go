@@ -1,3 +1,5 @@
+//go:build windows
+
 package lock
 
 import (
@@ -5,8 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 type Lock struct {
@@ -24,7 +27,17 @@ func Acquire(storeDir string) (*Lock, error) {
 		return nil, fmt.Errorf("open lock file: %w", err)
 	}
 
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	// Try to acquire exclusive lock (non-blocking)
+	ol := new(windows.Overlapped)
+	err = windows.LockFileEx(
+		windows.Handle(f.Fd()),
+		windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY,
+		0,
+		1,
+		0,
+		ol,
+	)
+	if err != nil {
 		_, _ = f.Seek(0, 0)
 		b, _ := os.ReadFile(path)
 		_ = f.Close()
@@ -47,7 +60,8 @@ func (l *Lock) Release() error {
 	if l == nil || l.f == nil {
 		return nil
 	}
-	_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
+	ol := new(windows.Overlapped)
+	_ = windows.UnlockFileEx(windows.Handle(l.f.Fd()), 0, 1, 0, ol)
 	err := l.f.Close()
 	l.f = nil
 	return err
