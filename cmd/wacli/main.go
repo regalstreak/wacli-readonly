@@ -19,16 +19,17 @@ func main() {
 func applyDeviceLabel() {
 	label := strings.TrimSpace(os.Getenv("WACLI_DEVICE_LABEL"))
 	platformRaw := strings.TrimSpace(os.Getenv("WACLI_DEVICE_PLATFORM"))
-	if platformRaw != "" {
-		platform := parsePlatformType(platformRaw)
-		store.DeviceProps.PlatformType = platform.Enum()
-	}
+
+	// Always set platform type - defaults to Chrome if not specified
+	platform := parsePlatformType(platformRaw)
+	store.DeviceProps.PlatformType = platform.Enum()
+
+	// Set OS info to look like Chrome browser
 	if label == "" {
-		return
+		label = "Chrome"
 	}
-	store.SetOSInfo(label, [3]uint32{0, 1, 0})
-	store.BaseClientPayload.UserAgent.Device = proto.String(label)
-	store.BaseClientPayload.UserAgent.Manufacturer = proto.String(label)
+	store.SetOSInfo(label, [3]uint32{10, 0, 0})
+	store.DeviceProps.Os = proto.String(label)
 }
 
 func parsePlatformType(raw string) waCompanionReg.DeviceProps_PlatformType {
