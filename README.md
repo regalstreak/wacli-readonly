@@ -1,100 +1,98 @@
-# 🗃️ wacli — WhatsApp CLI: sync, search, send.
+# 🗃️ wacli-readonly — WhatsApp CLI (Read-Only Fork)
+
+**Read-only fork of [wacli](https://github.com/steipete/wacli)** with all write/send capabilities removed.
 
 WhatsApp CLI built on top of `whatsmeow`, focused on:
 
-- Best-effort local sync of message history + continuous capture
-- Fast offline search
-- Sending messages
-- Contact + group management
+- ✅ Best-effort local sync of message history + continuous capture
+- ✅ Fast offline search
+- ✅ Contact + group viewing
+- ❌ **Sending messages (REMOVED)**
+- ❌ **Group management/editing (REMOVED)**
 
 This is a third-party tool that uses the WhatsApp Web protocol via `whatsmeow` and is not affiliated with WhatsApp.
 
-## Status
+## What's Different?
 
-Core implementation is in place. See `docs/spec.md` for the full design notes.
+This fork removes all write operations to provide a **read-only monitoring interface**:
 
-## Recent updates (0.2.0)
+### Removed Commands:
+- ❌ `send text` - Send text messages
+- ❌ `send file` - Send files/media
+- ❌ `groups rename` - Rename groups
+- ❌ `groups participants` - Add/remove/promote/demote members
+- ❌ `groups invite` - Manage invite links
+- ❌ `groups join` - Join groups
+- ❌ `groups leave` - Leave groups
 
-- Messages: search/list includes display text for reactions, replies, and media types.
-- Send: `wacli send file --filename` to override the display name.
-- Auth: optional `WACLI_DEVICE_LABEL` / `WACLI_DEVICE_PLATFORM` env overrides.
+### Retained Commands:
+- ✅ `auth` - Authenticate (QR code)
+- ✅ `sync` - Sync message history
+- ✅ `messages search` - Search messages
+- ✅ `messages list` - List messages
+- ✅ `chats list` - List chats
+- ✅ `contacts list` - List contacts
+- ✅ `groups list` - View groups
+- ✅ `groups info` - View group details
+- ✅ `groups refresh` - Refresh group list
+- ✅ `history backfill` - Backfill older messages
+- ✅ `media download` - Download media files
+- ✅ `doctor` - Diagnostics
 
-## Install / Build
+## Use Case
 
-Choose **one** of the following options.  
-If you install via Homebrew, you can skip the local build step.
+Perfect for:
+- **Monitoring WhatsApp without risk of sending messages**
+- **Integration with automation tools that should only read**
+- **Logging/archiving WhatsApp conversations**
+- **Search and analysis without modification capabilities**
 
-### Option A: Install via Homebrew (tap)
+## Build
 
-- `brew install steipete/tap/wacli`
+```bash
+go build -tags sqlite_fts5 -o ./dist/wacli-readonly ./cmd/wacli
+```
 
-### Option B: Build locally
-
-- `go build -tags sqlite_fts5 -o ./dist/wacli ./cmd/wacli`
-
-Run (local build only):
-
-- `./dist/wacli --help`
-
-## Quick start
+## Quick Start
 
 Default store directory is `~/.wacli` (override with `--store DIR`).
 
 ```bash
 # 1) Authenticate (shows QR), then bootstrap sync
-pnpm wacli auth
-# or: ./dist/wacli auth (after pnpm build)
+./dist/wacli-readonly auth
 
 # 2) Keep syncing (never shows QR; requires prior auth)
-pnpm wacli sync --follow
+./dist/wacli-readonly sync --follow
 
 # Diagnostics
-pnpm wacli doctor
+./dist/wacli-readonly doctor
 
 # Search messages
-pnpm wacli messages search "meeting"
+./dist/wacli-readonly messages search "meeting"
 
-# Backfill older messages for a chat (best-effort; requires your primary device online)
-pnpm wacli history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50
+# List chats
+./dist/wacli-readonly chats list --limit 50
 
-# Download media for a message (after syncing)
-./wacli media download --chat 1234567890@s.whatsapp.net --id <message-id>
+# View group info (read-only)
+./dist/wacli-readonly groups info --jid 1234567890@g.us
 
-# Send a message
-pnpm wacli send text --to 1234567890 --message "hello"
+# Backfill older messages for a chat
+./dist/wacli-readonly history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50
 
-# Send a file
-./wacli send file --to 1234567890 --file ./pic.jpg --caption "hi"
-# Or override display name
-./wacli send file --to 1234567890 --file /tmp/abc123 --filename report.pdf
-
-# List groups and manage participants
-pnpm wacli groups list
-pnpm wacli groups rename --jid 123456789@g.us --name "New name"
+# Download media for a message
+./dist/wacli-readonly media download --chat 1234567890@s.whatsapp.net --id <message-id>
 ```
-
-## Prior Art / Credit
-
-This project is heavily inspired by (and learns from) the excellent `whatsapp-cli` by Vicente Reig:
-
-- [`whatsapp-cli`](https://github.com/vicentereig/whatsapp-cli)
-
-## High-level UX
-
-- `wacli auth`: interactive login (shows QR code), then immediately performs initial data sync.
-- `wacli sync`: non-interactive sync loop (never shows QR; errors if not authenticated).
-- Output is human-readable by default; pass `--json` for machine-readable output.
 
 ## Storage
 
 Defaults to `~/.wacli` (override with `--store DIR`).
 
-## Environment overrides
+## Environment Overrides
 
 - `WACLI_DEVICE_LABEL`: set the linked device label (shown in WhatsApp).
 - `WACLI_DEVICE_PLATFORM`: override the linked device platform (defaults to `CHROME` if unset or invalid).
 
-## Backfilling older history
+## Backfilling Older History
 
 `wacli sync` stores whatever WhatsApp Web sends opportunistically. To try to fetch *older* messages, use on-demand history sync requests to your **primary device** (your phone).
 
@@ -102,27 +100,37 @@ Important notes:
 
 - This is **best-effort**: WhatsApp may not return full history.
 - Your **primary device must be online**.
-- Requests are **per chat** (DM or group). `wacli` uses the *oldest locally stored message* in that chat as the anchor.
+- Requests are **per chat** (DM or group). Uses the *oldest locally stored message* in that chat as the anchor.
 - Recommended `--count` is `50` per request.
 
 ### Backfill one chat
 
 ```bash
-pnpm wacli history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50
+./dist/wacli-readonly history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50
 ```
 
 ### Backfill all chats (script)
 
-This loops through chats already known in your local DB:
-
 ```bash
-pnpm -s wacli -- --json chats list --limit 100000 \
+./dist/wacli-readonly --json chats list --limit 100000 \
   | jq -r '.[].JID' \
   | while read -r jid; do
-      pnpm -s wacli -- history backfill --chat "$jid" --requests 3 --count 50
+      ./dist/wacli-readonly history backfill --chat "$jid" --requests 3 --count 50
     done
 ```
 
+## Prior Art / Credit
+
+This is a fork of the excellent `wacli` by Peter Steinberger:
+- [`wacli`](https://github.com/steipete/wacli)
+
+Which was inspired by:
+- [`whatsapp-cli`](https://github.com/vicentereig/whatsapp-cli) by Vicente Reig
+
 ## License
 
-See `LICENSE`.
+See `LICENSE` (same as upstream wacli).
+
+---
+
+**⚠️ Note:** This is an unofficial read-only fork. For the full-featured version with sending capabilities, see the [original wacli](https://github.com/steipete/wacli).
