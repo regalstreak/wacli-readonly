@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -14,10 +15,17 @@ import (
 	"github.com/steipete/wacli/internal/out"
 )
 
+// saveQRCode saves the QR code data as a PNG image using qrencode
+func saveQRCode(data, filename string) error {
+	cmd := exec.Command("qrencode", "-o", filename, "-t", "PNG", "-s", "10", data)
+	return cmd.Run()
+}
+
 func newAuthCmd(flags *rootFlags) *cobra.Command {
 	var follow bool
 	var idleExit time.Duration
 	var downloadMedia bool
+	var qrFile string
 
 	cmd := &cobra.Command{
 		Use:   "auth",
@@ -49,6 +57,15 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 					fmt.Fprintln(os.Stderr, "\nScan this QR code with WhatsApp (Linked Devices):")
 					qrterminal.GenerateHalfBlock(code, qrterminal.M, os.Stderr)
 					fmt.Fprintln(os.Stderr)
+					
+					// Save QR code to file if requested
+					if qrFile != "" {
+						if err := saveQRCode(code, qrFile); err != nil {
+							fmt.Fprintf(os.Stderr, "Warning: Failed to save QR code to %s: %v\n", qrFile, err)
+						} else {
+							fmt.Fprintf(os.Stderr, "QR code saved to: %s\n", qrFile)
+						}
+					}
 				},
 			})
 			if err != nil {
@@ -70,6 +87,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&follow, "follow", false, "keep syncing after auth")
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 30*time.Second, "exit after being idle (bootstrap/once modes)")
 	cmd.Flags().BoolVar(&downloadMedia, "download-media", false, "download media in the background during sync")
+	cmd.Flags().StringVar(&qrFile, "qr-file", "", "save QR code as PNG image to this file")
 
 	cmd.AddCommand(newAuthStatusCmd(flags))
 	cmd.AddCommand(newAuthLogoutCmd(flags))
