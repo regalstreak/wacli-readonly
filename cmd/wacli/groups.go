@@ -11,7 +11,6 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/steipete/wacli/internal/out"
 	"github.com/steipete/wacli/internal/store"
-	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/types"
 )
 
