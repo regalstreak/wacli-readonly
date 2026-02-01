@@ -1,11 +1,11 @@
 version: 2
 
-project_name: wacli
+project_name: wacli-readonly
 
 builds:
-  - id: wacli
+  - id: wacli-readonly
     main: ./cmd/wacli
-    binary: wacli
+    binary: wacli-readonly
     env:
       - CGO_ENABLED=1
     flags:
@@ -21,10 +21,10 @@ builds:
       - arm64
 
 universal_binaries:
-  - id: wacli
+  - id: wacli-readonly
     ids:
-      - wacli
-    name_template: wacli
+      - wacli-readonly
+    name_template: wacli-readonly
     replace: true
 
 archives:
