@@ -47,7 +47,27 @@ Perfect for:
 - **Logging/archiving WhatsApp conversations**
 - **Search and analysis without modification capabilities**
 
-## Build
+## Installation
+
+### Homebrew (macOS & Linux)
+
+```bash
+brew tap regalstreak/tap
+brew install wacli-readonly
+```
+
+### Direct Download
+
+Download the latest release for your platform from the [Releases page](https://github.com/regalstreak/wacli-readonly/releases):
+
+| Platform | File |
+|----------|------|
+| macOS (Intel & Apple Silicon) | `wacli-readonly-macos-universal.tar.gz` |
+| Linux x64 | `wacli-readonly-linux-amd64.tar.gz` |
+| Linux ARM64 | `wacli-readonly-linux-arm64.tar.gz` |
+| Windows x64 | `wacli-readonly-windows-amd64.zip` |
+
+### Build from Source
 
 ```bash
 go build -tags sqlite_fts5 -o ./dist/wacli-readonly ./cmd/wacli
@@ -59,28 +79,28 @@ Default store directory is `~/.wacli` (override with `--store DIR`).
 
 ```bash
 # 1) Authenticate (shows QR), then bootstrap sync
-./dist/wacli-readonly auth
+wacli-readonly auth
 
 # 2) Keep syncing (never shows QR; requires prior auth)
-./dist/wacli-readonly sync --follow
+wacli-readonly sync --follow
 
 # Diagnostics
-./dist/wacli-readonly doctor
+wacli-readonly doctor
 
 # Search messages
-./dist/wacli-readonly messages search "meeting"
+wacli-readonly messages search "meeting"
 
 # List chats
-./dist/wacli-readonly chats list --limit 50
+wacli-readonly chats list --limit 50
 
 # View group info (read-only)
-./dist/wacli-readonly groups info --jid 1234567890@g.us
+wacli-readonly groups info --jid 1234567890@g.us
 
 # Backfill older messages for a chat
-./dist/wacli-readonly history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50
+wacli-readonly history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50
 
 # Download media for a message
-./dist/wacli-readonly media download --chat 1234567890@s.whatsapp.net --id <message-id>
+wacli-readonly media download --chat 1234567890@s.whatsapp.net --id <message-id>
 ```
 
 ## Storage
@@ -106,16 +126,16 @@ Important notes:
 ### Backfill one chat
 
 ```bash
-./dist/wacli-readonly history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50
+wacli-readonly history backfill --chat 1234567890@s.whatsapp.net --requests 10 --count 50
 ```
 
 ### Backfill all chats (script)
 
 ```bash
-./dist/wacli-readonly --json chats list --limit 100000 \
+wacli-readonly --json chats list --limit 100000 \
   | jq -r '.[].JID' \
   | while read -r jid; do
-      ./dist/wacli-readonly history backfill --chat "$jid" --requests 3 --count 50
+      wacli-readonly history backfill --chat "$jid" --requests 3 --count 50
     done
 ```
 
