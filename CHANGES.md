@@ -87,7 +87,7 @@ To use with OpenClaw for WhatsApp monitoring:
 1. Build this read-only version
 2. Authenticate: `./dist/wacli-readonly auth`
 3. Set up sync in background: `./dist/wacli-readonly sync --follow`
-4. Configure OpenClaw to read from `~/.wacli` database
+4. Configure OpenClaw to read from `~/.wacli-readonly` database
 5. Use `messages search` and `chats list` for queries
 
 The read-only nature ensures OpenClaw agents cannot accidentally send messages to WhatsApp contacts.

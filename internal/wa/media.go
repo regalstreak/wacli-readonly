@@ -47,7 +47,7 @@ func (c *Client) DownloadMediaToFile(ctx context.Context, directPath string, enc
 		return 0, fmt.Errorf("create output dir: %w", err)
 	}
 
-	tmpFile, err := os.CreateTemp(filepath.Dir(targetPath), ".wacli-download-*")
+	tmpFile, err := os.CreateTemp(filepath.Dir(targetPath), ".wacli-readonly-download-*")
 	if err != nil {
 		return 0, fmt.Errorf("create temp file: %w", err)
 	}

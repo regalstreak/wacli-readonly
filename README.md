@@ -75,7 +75,7 @@ go build -tags sqlite_fts5 -o ./dist/wacli-readonly ./cmd/wacli
 
 ## Quick Start
 
-Default store directory is `~/.wacli` (override with `--store DIR`).
+Default store directory is `~/.wacli-readonly` (override with `--store DIR`).
 
 ```bash
 # 1) Authenticate (shows QR), then bootstrap sync
@@ -105,7 +105,7 @@ wacli-readonly media download --chat 1234567890@s.whatsapp.net --id <message-id>
 
 ## Storage
 
-Defaults to `~/.wacli` (override with `--store DIR`).
+Defaults to `~/.wacli-readonly` (override with `--store DIR`).
 
 ## Environment Overrides
 

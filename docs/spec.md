@@ -21,18 +21,18 @@ This document defines the v1 plan for `wacli`: a WhatsApp CLI that syncs message
 ## Terminology
 
 - **JID**: WhatsApp Jabber ID, e.g. `1234567890@s.whatsapp.net` (user) or `123456789@g.us` (group).
-- **Store directory**: directory containing all local state, default `~/.wacli`.
+- **Store directory**: directory containing all local state, default `~/.wacli-readonly`.
 
 ## Storage layout
 
-Default store: `~/.wacli` (override with `--store DIR`).
+Default store: `~/.wacli-readonly` (override with `--store DIR`).
 
 Proposed files:
 
-- `~/.wacli/session.db` — `whatsmeow` SQL store (device identity, keys, app-state).
-- `~/.wacli/wacli.db` — our SQLite DB (messages/chats, FTS, local metadata).
-- `~/.wacli/media/...` — downloaded media (optional, on-demand or background).
-- `~/.wacli/LOCK` — store lock to prevent concurrent access.
+- `~/.wacli-readonly/session.db` — `whatsmeow` SQL store (device identity, keys, app-state).
+- `~/.wacli-readonly/wacli.db` — our SQLite DB (messages/chats, FTS, local metadata).
+- `~/.wacli-readonly/media/...` — downloaded media (optional, on-demand or background).
+- `~/.wacli-readonly/LOCK` — store lock to prevent concurrent access.
 
 Rationale for two SQLite files: reduce coupling and keep the `whatsmeow`-owned schema separate from `wacli`’s local schema. It’s still “one store directory” for the user.
 
@@ -132,7 +132,7 @@ Fallback:
 
 Global flags:
 
-- `--store DIR` (default `~/.wacli`)
+- `--store DIR` (default `~/.wacli-readonly`)
 - `--json` (default: human text)
 - `--timeout DURATION` (non-sync commands; e.g. `5m`)
 - `--version` (prints version and exits)
@@ -234,7 +234,7 @@ Recommendation:
 - `sync` (non-interactive, follow mode)
 - `messages list/search` with FTS5
 - `send text`
-- store locking, default `~/.wacli`
+- store locking, default `~/.wacli-readonly`
 
 ### v0.2
 

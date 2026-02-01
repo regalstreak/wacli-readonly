@@ -8,7 +8,7 @@ import (
 func DefaultStoreDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return ".wacli"
+		return ".wacli-readonly"
 	}
-	return filepath.Join(home, ".wacli")
+	return filepath.Join(home, ".wacli-readonly")
 }
