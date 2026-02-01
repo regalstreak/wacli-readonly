@@ -41,6 +41,7 @@ checksum:
 
 brews:
   - name: wacli-readonly
+    directory: Formula
     repository:
       owner: regalstreak
       name: homebrew-tap
