@@ -168,43 +168,19 @@ func (c *Client) RemoveEventHandler(id uint32) {
 	cli.RemoveEventHandler(id)
 }
 
+// SendText is disabled in the read-only build.
 func (c *Client) SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error) {
-	c.mu.Lock()
-	cli := c.client
-	c.mu.Unlock()
-	if cli == nil || !cli.IsConnected() {
-		return "", fmt.Errorf("not connected")
-	}
-	msg := &waProto.Message{Conversation: &text}
-	resp, err := cli.SendMessage(ctx, to, msg)
-	if err != nil {
-		return "", err
-	}
-	return resp.ID, nil
+	return "", fmt.Errorf("send operations disabled in read-only build")
 }
 
+// SendProtoMessage is disabled in the read-only build.
 func (c *Client) SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
-	c.mu.Lock()
-	cli := c.client
-	c.mu.Unlock()
-	if cli == nil || !cli.IsConnected() {
-		return "", fmt.Errorf("not connected")
-	}
-	resp, err := cli.SendMessage(ctx, to, msg)
-	if err != nil {
-		return "", err
-	}
-	return resp.ID, nil
+	return "", fmt.Errorf("send operations disabled in read-only build")
 }
 
+// Upload is disabled in the read-only build.
 func (c *Client) Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
-	c.mu.Lock()
-	cli := c.client
-	c.mu.Unlock()
-	if cli == nil || !cli.IsConnected() {
-		return whatsmeow.UploadResponse{}, fmt.Errorf("not connected")
-	}
-	return cli.Upload(ctx, data, mediaType)
+	return whatsmeow.UploadResponse{}, fmt.Errorf("upload operations disabled in read-only build")
 }
 
 func (c *Client) DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error) {
