@@ -130,7 +130,3 @@ Which was inspired by:
 ## License
 
 See `LICENSE` (same as upstream wacli).
-
----
-
-**⚠️ Note:** This is an unofficial read-only fork. For the full-featured version with sending capabilities, see the [original wacli](https://github.com/steipete/wacli).
