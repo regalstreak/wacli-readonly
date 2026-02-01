@@ -39,6 +39,18 @@ archives:
 checksum:
   name_template: checksums.txt
 
+brews:
+  - name: wacli-readonly
+    repository:
+      owner: regalstreak
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/regalstreak/wacli-readonly"
+    description: "Read-only WhatsApp CLI for syncing and searching messages"
+    license: "MIT"
+    install: |
+      bin.install "wacli-readonly"
+
 changelog:
   sort: asc
   filters:
