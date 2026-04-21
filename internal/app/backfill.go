@@ -22,6 +22,13 @@ type BackfillOptions struct {
 	IdleExit       time.Duration
 }
 
+const (
+	DefaultBackfillCount    = 50
+	DefaultBackfillRequests = 1
+	MaxBackfillCount        = 500
+	MaxBackfillRequests     = 100
+)
+
 type BackfillResult struct {
 	ChatJID        string
 	RequestsSent   int
@@ -47,17 +54,9 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 	}
 	chatStr = chat.String()
 
-	if opts.Count <= 0 {
-		opts.Count = 50
-	}
-	if opts.Requests <= 0 {
-		opts.Requests = 1
-	}
-	if opts.WaitPerRequest <= 0 {
-		opts.WaitPerRequest = 60 * time.Second
-	}
-	if opts.IdleExit <= 0 {
-		opts.IdleExit = 5 * time.Second
+	opts = normalizeBackfillOptions(opts)
+	if err := validateBackfillOptions(opts); err != nil {
+		return BackfillResult{}, err
 	}
 
 	if err := a.EnsureAuthed(); err != nil {
@@ -189,4 +188,30 @@ func (a *App) BackfillHistory(ctx context.Context, opts BackfillOptions) (Backfi
 		MessagesAdded:  afterCount - beforeCount,
 		MessagesSynced: syncRes.MessagesStored,
 	}, nil
+}
+
+func normalizeBackfillOptions(opts BackfillOptions) BackfillOptions {
+	if opts.Count <= 0 {
+		opts.Count = DefaultBackfillCount
+	}
+	if opts.Requests <= 0 {
+		opts.Requests = DefaultBackfillRequests
+	}
+	if opts.WaitPerRequest <= 0 {
+		opts.WaitPerRequest = 60 * time.Second
+	}
+	if opts.IdleExit <= 0 {
+		opts.IdleExit = 5 * time.Second
+	}
+	return opts
+}
+
+func validateBackfillOptions(opts BackfillOptions) error {
+	if opts.Count > MaxBackfillCount {
+		return fmt.Errorf("--count must be <= %d (got %d)", MaxBackfillCount, opts.Count)
+	}
+	if opts.Requests > MaxBackfillRequests {
+		return fmt.Errorf("--requests must be <= %d (got %d)", MaxBackfillRequests, opts.Requests)
+	}
+	return nil
 }

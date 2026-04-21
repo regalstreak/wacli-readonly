@@ -14,20 +14,22 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   goreleaser-darwin:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: ./.github/actions/setup-ci-env
         with:
           go-version-file: go.mod
-          cache: true
 
       - name: Stash GoReleaser config
         run: cp .goreleaser.yaml /tmp/.goreleaser.yaml
@@ -51,24 +53,15 @@ jobs:
     needs: goreleaser-darwin
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: ./.github/actions/setup-ci-env
         with:
           go-version-file: go.mod
-          cache: true
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            gcc-aarch64-linux-gnu \
-            libc6-dev-arm64-cross \
-            mingw-w64
+          apt-packages: "build-essential gcc-aarch64-linux-gnu libc6-dev-arm64-cross mingw-w64"
 
       - name: Stash GoReleaser config
         run: cp .goreleaser-linux-windows.yaml /tmp/.goreleaser-linux-windows.yaml

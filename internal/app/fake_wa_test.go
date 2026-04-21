@@ -25,6 +25,8 @@ type fakeWA struct {
 	handlers      map[uint32]func(interface{})
 
 	connectEvents []interface{}
+	connectDelay  time.Duration
+	downloadDelay time.Duration
 
 	contacts map[types.JID]types.ContactInfo
 	groups   map[types.JID]*types.GroupInfo
@@ -72,6 +74,13 @@ func (f *fakeWA) Connect(ctx context.Context, opts wa.ConnectOptions) error {
 
 	if !authed && !opts.AllowQR {
 		return fmt.Errorf("not authenticated; run `wacli auth`")
+	}
+	if f.connectDelay > 0 {
+		select {
+		case <-time.After(f.connectDelay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 	f.emit(&events.Connected{})
 	for _, e := range eventsToEmit {
@@ -212,8 +221,16 @@ func (f *fakeWA) SendProtoMessage(ctx context.Context, to types.JID, msg *waProt
 	return types.MessageID("msgid"), nil
 }
 
+func (f *fakeWA) SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error) {
+	return types.MessageID("reactionid"), nil
+}
+
 func (f *fakeWA) Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
 	return whatsmeow.UploadResponse{}, nil
+}
+
+func (f *fakeWA) SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error {
+	return nil
 }
 
 func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error) {
@@ -221,6 +238,13 @@ func (f *fakeWA) DecryptReaction(ctx context.Context, reaction *events.Message) 
 }
 
 func (f *fakeWA) DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error) {
+	if f.downloadDelay > 0 {
+		select {
+		case <-time.After(f.downloadDelay):
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0o700); err != nil {
 		return 0, err
 	}
@@ -249,4 +273,11 @@ func (f *fakeWA) Logout(ctx context.Context) error {
 	defer f.mu.Unlock()
 	f.authed = false
 	return nil
+}
+
+func (f *fakeWA) LinkedJID() string {
+	if !f.IsAuthed() {
+		return ""
+	}
+	return "1234567890@s.whatsapp.net"
 }

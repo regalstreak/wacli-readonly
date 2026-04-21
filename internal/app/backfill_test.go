@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,6 +78,38 @@ func TestBackfillHistoryAddsOlderMessages(t *testing.T) {
 	}
 	if oldest.MsgID != "m1" {
 		t.Fatalf("expected oldest m1, got %q", oldest.MsgID)
+	}
+}
+
+func TestNormalizeBackfillOptions(t *testing.T) {
+	opts := normalizeBackfillOptions(BackfillOptions{})
+
+	if opts.Count != DefaultBackfillCount {
+		t.Fatalf("Count = %d, want %d", opts.Count, DefaultBackfillCount)
+	}
+	if opts.Requests != DefaultBackfillRequests {
+		t.Fatalf("Requests = %d, want %d", opts.Requests, DefaultBackfillRequests)
+	}
+	if opts.WaitPerRequest <= 0 || opts.IdleExit <= 0 {
+		t.Fatalf("durations must default positive: %+v", opts)
+	}
+}
+
+func TestValidateBackfillOptionsCapsWork(t *testing.T) {
+	err := validateBackfillOptions(BackfillOptions{
+		Count:    MaxBackfillCount + 1,
+		Requests: DefaultBackfillRequests,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--count") {
+		t.Fatalf("count error = %v", err)
+	}
+
+	err = validateBackfillOptions(BackfillOptions{
+		Count:    DefaultBackfillCount,
+		Requests: MaxBackfillRequests + 1,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--requests") {
+		t.Fatalf("requests error = %v", err)
 	}
 }
 

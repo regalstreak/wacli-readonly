@@ -7,10 +7,11 @@ import (
 	"mime"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
-	"time"
 
+	"github.com/steipete/wacli/internal/fsutil"
 	"github.com/steipete/wacli/internal/pathutil"
 	"github.com/steipete/wacli/internal/store"
 )
@@ -91,13 +92,26 @@ func (a *App) runMediaWorkers(ctx context.Context, jobs <-chan mediaJob, workers
 				select {
 				case <-ctx.Done():
 					return
-				case job := <-jobs:
+				case job, ok := <-jobs:
+					if !ok {
+						return
+					}
 					if strings.TrimSpace(job.chatJID) == "" || strings.TrimSpace(job.msgID) == "" {
 						continue
 					}
-					if err := a.downloadMediaJob(ctx, job); err != nil {
-						fmt.Fprintf(os.Stderr, "media download failed for %s/%s: %v\n", job.chatJID, job.msgID, err)
-					}
+					// Recover per job so a panic fails one download
+					// instead of killing the worker permanently (#52).
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								fmt.Fprintf(os.Stderr, "media worker panic (recovered) for %s/%s: %v\n%s\n",
+									job.chatJID, job.msgID, r, debug.Stack())
+							}
+						}()
+						if err := a.downloadMediaJob(ctx, job); err != nil {
+							fmt.Fprintf(os.Stderr, "media download failed for %s/%s: %v\n", job.chatJID, job.msgID, err)
+						}
+					}()
 				}
 			}
 		}()
@@ -129,7 +143,7 @@ func (a *App) downloadMediaJob(ctx context.Context, job mediaJob) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0700); err != nil {
+	if err := fsutil.EnsurePrivateDir(filepath.Dir(targetPath)); err != nil {
 		return err
 	}
 
@@ -137,6 +151,6 @@ func (a *App) downloadMediaJob(ctx context.Context, job mediaJob) error {
 		return err
 	}
 
-	now := time.Now().UTC()
+	now := nowUTC()
 	return a.db.MarkMediaDownloaded(info.ChatJID, info.MsgID, targetPath, now)
 }

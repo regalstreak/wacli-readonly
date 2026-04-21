@@ -55,3 +55,20 @@ func TestLockBlocksOtherProcess(t *testing.T) {
 		t.Fatalf("expected helper to report locked; output=%q", strings.TrimSpace(got))
 	}
 }
+
+func TestAcquireWithTimeout(t *testing.T) {
+	dir := t.TempDir()
+
+	lk, err := Acquire(dir)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	defer lk.Release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = AcquireWithTimeout(ctx, dir, 50*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "timed out waiting for store lock") {
+		t.Fatalf("AcquireWithTimeout error = %v", err)
+	}
+}

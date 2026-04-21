@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
-	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -27,9 +25,13 @@ func newMessagesCmd(flags *rootFlags) *cobra.Command {
 
 func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 	var chat string
+	var sender string
 	var limit int
 	var afterStr string
 	var beforeStr string
+	var fromMe bool
+	var fromThem bool
+	var asc bool
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -37,6 +39,10 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
+
+			if fromMe && fromThem {
+				return fmt.Errorf("--from-me and --from-them are mutually exclusive")
+			}
 
 			a, lk, err := newApp(ctx, flags, false, false)
 			if err != nil {
@@ -61,11 +67,24 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 				before = &t
 			}
 
+			var fromMeFilter *bool
+			switch {
+			case fromMe:
+				v := true
+				fromMeFilter = &v
+			case fromThem:
+				v := false
+				fromMeFilter = &v
+			}
+
 			msgs, err := a.DB().ListMessages(store.ListMessagesParams{
-				ChatJID: chat,
-				Limit:   limit,
-				After:   after,
-				Before:  before,
+				ChatJID:   chat,
+				SenderJID: sender,
+				Limit:     limit,
+				After:     after,
+				Before:    before,
+				FromMe:    fromMeFilter,
+				Asc:       asc,
 			})
 			if err != nil {
 				return err
@@ -78,41 +97,18 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 				})
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "TIME\tCHAT\tFROM\tID\tTEXT")
-			for _, m := range msgs {
-				from := m.SenderJID
-				if m.FromMe {
-					from = "me"
-				}
-				chatLabel := m.ChatName
-				if chatLabel == "" {
-					chatLabel = m.ChatJID
-				}
-				text := strings.TrimSpace(m.DisplayText)
-				if text == "" {
-					text = strings.TrimSpace(m.Text)
-				}
-				if m.MediaType != "" && text == "" {
-					text = "Sent " + m.MediaType
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-					m.Timestamp.Local().Format("2006-01-02 15:04:05"),
-					truncate(chatLabel, 24),
-					truncate(from, 18),
-					truncate(m.MsgID, 14),
-					truncate(text, 80),
-				)
-			}
-			_ = w.Flush()
-			return nil
+			return writeMessagesList(os.Stdout, msgs, fullTableOutput(flags.fullOutput))
 		},
 	}
 
-	cmd.Flags().StringVar(&chat, "chat", "", "chat JID")
-	cmd.Flags().IntVar(&limit, "limit", 50, "limit results")
+	cmd.Flags().StringVar(&chat, "chat", "", "filter by chat JID")
+	cmd.Flags().StringVar(&sender, "sender", "", "filter by sender JID")
+	cmd.Flags().IntVar(&limit, "limit", 50, "max number of messages to return")
 	cmd.Flags().StringVar(&afterStr, "after", "", "only messages after time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
+	cmd.Flags().BoolVar(&fromMe, "from-me", false, "only messages sent by me")
+	cmd.Flags().BoolVar(&fromThem, "from-them", false, "only messages received (not sent by me)")
+	cmd.Flags().BoolVar(&asc, "asc", false, "show oldest messages first (default: newest first)")
 	return cmd
 }
 
@@ -122,6 +118,7 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 	var limit int
 	var afterStr string
 	var beforeStr string
+	var hasMedia bool
 	var msgType string
 
 	cmd := &cobra.Command{
@@ -156,13 +153,14 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 			}
 
 			msgs, err := a.DB().SearchMessages(store.SearchMessagesParams{
-				Query:   args[0],
-				ChatJID: chat,
-				From:    from,
-				Limit:   limit,
-				After:   after,
-				Before:  before,
-				Type:    msgType,
+				Query:    args[0],
+				ChatJID:  chat,
+				From:     from,
+				Limit:    limit,
+				After:    after,
+				Before:   before,
+				HasMedia: hasMedia,
+				Type:     msgType,
 			})
 			if err != nil {
 				return err
@@ -175,33 +173,9 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 				})
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-			fmt.Fprintf(w, "TIME\tCHAT\tFROM\tID\tMATCH\n")
-			for _, m := range msgs {
-				fromLabel := m.SenderJID
-				if m.FromMe {
-					fromLabel = "me"
-				}
-				chatLabel := m.ChatName
-				if chatLabel == "" {
-					chatLabel = m.ChatJID
-				}
-				match := m.Snippet
-				if match == "" {
-					match = strings.TrimSpace(m.DisplayText)
-				}
-				if match == "" {
-					match = m.Text
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-					m.Timestamp.Local().Format("2006-01-02 15:04:05"),
-					truncate(chatLabel, 24),
-					truncate(fromLabel, 18),
-					truncate(m.MsgID, 14),
-					truncate(match, 90),
-				)
+			if err := writeMessagesSearch(os.Stdout, msgs, fullTableOutput(flags.fullOutput)); err != nil {
+				return err
 			}
-			_ = w.Flush()
 			if !a.DB().HasFTS() {
 				fmt.Fprintln(os.Stderr, "Note: FTS5 not enabled; search is using LIKE (slow).")
 			}
@@ -214,7 +188,8 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().IntVar(&limit, "limit", 50, "limit results")
 	cmd.Flags().StringVar(&afterStr, "after", "", "only messages after time (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&beforeStr, "before", "", "only messages before time (RFC3339 or YYYY-MM-DD)")
-	cmd.Flags().StringVar(&msgType, "type", "", "media type filter (image|video|audio|document)")
+	cmd.Flags().BoolVar(&hasMedia, "has-media", false, "only messages with media")
+	cmd.Flags().StringVar(&msgType, "type", "", "message type filter (text|image|video|audio|document)")
 	return cmd
 }
 
@@ -248,22 +223,7 @@ func newMessagesShowCmd(flags *rootFlags) *cobra.Command {
 				return out.WriteJSON(os.Stdout, m)
 			}
 
-			fmt.Fprintf(os.Stdout, "Chat: %s\n", m.ChatJID)
-			if m.ChatName != "" {
-				fmt.Fprintf(os.Stdout, "Chat name: %s\n", m.ChatName)
-			}
-			fmt.Fprintf(os.Stdout, "ID: %s\n", m.MsgID)
-			fmt.Fprintf(os.Stdout, "Time: %s\n", m.Timestamp.Local().Format(time.RFC3339))
-			if m.FromMe {
-				fmt.Fprintf(os.Stdout, "From: me\n")
-			} else {
-				fmt.Fprintf(os.Stdout, "From: %s\n", m.SenderJID)
-			}
-			if m.MediaType != "" {
-				fmt.Fprintf(os.Stdout, "Media: %s\n", m.MediaType)
-			}
-			fmt.Fprintf(os.Stdout, "\n%s\n", m.Text)
-			return nil
+			return writeMessageShow(os.Stdout, m)
 		},
 	}
 
@@ -304,26 +264,7 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 				return out.WriteJSON(os.Stdout, msgs)
 			}
 
-			w := tabwriter.NewWriter(os.Stdout, 2, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "TIME\tFROM\tID\tTEXT")
-			for _, m := range msgs {
-				from := m.SenderJID
-				if m.FromMe {
-					from = "me"
-				}
-				line := m.Text
-				if m.MsgID == id {
-					line = ">> " + line
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\n",
-					m.Timestamp.Local().Format("2006-01-02 15:04:05"),
-					truncate(from, 18),
-					truncate(m.MsgID, 14),
-					truncate(line, 100),
-				)
-			}
-			_ = w.Flush()
-			return nil
+			return writeMessageContext(os.Stdout, msgs, id, fullTableOutput(flags.fullOutput))
 		},
 	}
 	cmd.Flags().StringVar(&chat, "chat", "", "chat JID")

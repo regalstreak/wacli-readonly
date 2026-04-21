@@ -39,6 +39,10 @@ go.work.sum
 
 # Built CLI binary
 /wacli
+/wacli-readonly
 
 # pnpm build output
 /dist/
+
+# macOS metadata
+.DS_Store

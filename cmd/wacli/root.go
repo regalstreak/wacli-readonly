@@ -15,28 +15,32 @@ import (
 	"github.com/steipete/wacli/internal/out"
 )
 
-var version = "dev"
+var version = "0.7.0"
 
 type rootFlags struct {
-	storeDir string
-	asJSON   bool
-	timeout  time.Duration
+	storeDir   string
+	asJSON     bool
+	fullOutput bool
+	timeout    time.Duration
+	lockWait   time.Duration
 }
 
 func execute(args []string) error {
 	var flags rootFlags
 
 	rootCmd := &cobra.Command{
-		Use:           "wacli",
+		Use:           "wacli-readonly",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Version:       version,
 	}
-	rootCmd.SetVersionTemplate("wacli {{.Version}}\n")
+	rootCmd.SetVersionTemplate("wacli-readonly {{.Version}}\n")
 
-	rootCmd.PersistentFlags().StringVar(&flags.storeDir, "store", "", "store directory (default: ~/.wacli-readonly)")
+	rootCmd.PersistentFlags().StringVar(&flags.storeDir, "store", "", "store directory (default: $WACLI_STORE_DIR, XDG state dir on Linux, or ~/.wacli-readonly)")
 	rootCmd.PersistentFlags().BoolVar(&flags.asJSON, "json", false, "output JSON instead of human-readable text")
+	rootCmd.PersistentFlags().BoolVar(&flags.fullOutput, "full", false, "disable truncation in table output")
 	rootCmd.PersistentFlags().DurationVar(&flags.timeout, "timeout", 5*time.Minute, "command timeout (non-sync commands)")
+	rootCmd.PersistentFlags().DurationVar(&flags.lockWait, "lock-wait", 0, "wait for the store lock before failing")
 
 	rootCmd.AddCommand(newVersionCmd())
 	rootCmd.AddCommand(newDoctorCmd(&flags))
@@ -67,7 +71,7 @@ func newApp(ctx context.Context, flags *rootFlags, needLock bool, allowUnauthed 
 	var lk *lock.Lock
 	if needLock {
 		var err error
-		lk, err = lock.Acquire(storeDir)
+		lk, err = lock.AcquireWithTimeout(ctx, storeDir, flags.lockWait)
 		if err != nil {
 			return nil, nil, err
 		}

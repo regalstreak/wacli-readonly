@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
-	"os/signal"
-	"syscall"
+	"strings"
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
@@ -15,7 +15,6 @@ import (
 	"github.com/steipete/wacli/internal/out"
 )
 
-// saveQRCode saves the QR code data as a PNG image using qrencode
 func saveQRCode(data, filename string) error {
 	cmd := exec.Command("qrencode", "-o", filename, "-t", "PNG", "-s", "10", data)
 	return cmd.Run()
@@ -31,7 +30,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 		Use:   "auth",
 		Short: "Authenticate with WhatsApp (QR) and bootstrap sync",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			ctx, stop := signalContext()
 			defer stop()
 
 			a, lk, err := newApp(ctx, flags, true, true)
@@ -57,8 +56,7 @@ func newAuthCmd(flags *rootFlags) *cobra.Command {
 					fmt.Fprintln(os.Stderr, "\nScan this QR code with WhatsApp (Linked Devices):")
 					qrterminal.GenerateHalfBlock(code, qrterminal.M, os.Stderr)
 					fmt.Fprintln(os.Stderr)
-					
-					// Save QR code to file if requested
+
 					if qrFile != "" {
 						if err := saveQRCode(code, qrFile); err != nil {
 							fmt.Fprintf(os.Stderr, "Warning: Failed to save QR code to %s: %v\n", qrFile, err)
@@ -113,20 +111,50 @@ func newAuthStatusCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			authed := a.WA().IsAuthed()
+			var linkedJID string
+			if authed {
+				linkedJID = a.WA().LinkedJID()
+			}
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
-					"authenticated": authed,
-				})
+				return out.WriteJSON(os.Stdout, authStatusPayload(authed, linkedJID))
 			}
-			if authed {
-				fmt.Fprintln(os.Stdout, "Authenticated.")
-			} else {
-				fmt.Fprintln(os.Stdout, "Not authenticated. Run `wacli auth`.")
-			}
+			writeAuthStatus(os.Stdout, authed, linkedJID)
 			return nil
 		},
 	}
+}
+
+func authStatusPayload(authed bool, linkedJID string) map[string]any {
+	data := map[string]any{"authenticated": authed}
+	if !authed || linkedJID == "" {
+		return data
+	}
+	data["linked_jid"] = linkedJID
+	if phone := phoneFromLinkedJID(linkedJID); phone != "" {
+		data["phone"] = phone
+	}
+	return data
+}
+
+func writeAuthStatus(w io.Writer, authed bool, linkedJID string) {
+	if !authed {
+		fmt.Fprintln(w, "Not authenticated. Run `wacli auth`.")
+		return
+	}
+	if linkedJID != "" {
+		fmt.Fprintf(w, "Authenticated as %s\n", linkedJID)
+		return
+	}
+	fmt.Fprintln(w, "Authenticated.")
+}
+
+func phoneFromLinkedJID(linkedJID string) string {
+	phone, _, ok := strings.Cut(linkedJID, "@")
+	if !ok {
+		return ""
+	}
+	return phone
 }
 
 func newAuthLogoutCmd(flags *rootFlags) *cobra.Command {

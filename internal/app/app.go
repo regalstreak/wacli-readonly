@@ -3,10 +3,10 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/steipete/wacli/internal/fsutil"
 	"github.com/steipete/wacli/internal/store"
 	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
@@ -39,12 +39,15 @@ type WAClient interface {
 
 	SendText(ctx context.Context, to types.JID, text string) (types.MessageID, error)
 	SendProtoMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error)
+	SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error)
 	Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error)
 	DownloadMediaToFile(ctx context.Context, directPath string, encFileHash, fileHash, mediaKey []byte, fileLength uint64, mediaType, mmsType string, targetPath string) (int64, error)
 
+	SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error
 	DecryptReaction(ctx context.Context, reaction *events.Message) (*waProto.ReactionMessage, error)
 	RequestHistorySyncOnDemand(ctx context.Context, lastKnown types.MessageInfo, count int) (types.MessageID, error)
 	Logout(ctx context.Context) error
+	LinkedJID() string
 }
 
 type Options struct {
@@ -64,7 +67,7 @@ func New(opts Options) (*App, error) {
 	if opts.StoreDir == "" {
 		return nil, fmt.Errorf("store dir is required")
 	}
-	if err := os.MkdirAll(opts.StoreDir, 0700); err != nil {
+	if err := fsutil.EnsurePrivateDir(opts.StoreDir); err != nil {
 		return nil, fmt.Errorf("create store dir: %w", err)
 	}
 

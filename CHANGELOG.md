@@ -1,10 +1,110 @@
 # Changelog
 
-## 0.2.1 - Unreleased
+## 0.7.0 - Unreleased (read-only fork)
+
+This release pulls upstream **wacli 0.7.0** changes into the read-only fork. All send/write commands added upstream (`send text`, `send file`, `send react`, `presence typing/paused`, `groups rename/participants/invite/join/leave`, `contacts refresh/alias/tags`) are **intentionally not registered** in this fork. Write methods at the `wa.Client` layer return errors unconditionally (defense-in-depth).
+
+### Read-only fork specifics
+
+- Remove `--read-only`/`WACLI_READONLY` flag — this fork is read-only by design, not by flag.
+- Remove all write command registrations (`send`, `presence`, `groups rename/participants/invite/join/leave`).
+- Stub `SendText`, `SendProtoMessage`, `SendReaction`, `Upload`, `SetGroupName`, `UpdateGroupParticipants`, `GetGroupInviteLink`, `JoinGroupWithLink`, `LeaveGroup`, `SendChatPresence` at the `wa.Client` layer.
+- Default `WACLI_DEVICE_LABEL` to `Chrome` to blend in with normal Web sessions.
+- Auth: add `--qr-file PATH` to save QR code as PNG (requires `qrencode`).
+- Rename binary/project to `wacli-readonly`; default store dir is `~/.wacli-readonly`.
+
+### Pulled from upstream 0.7.0
+
+- CLI: add `--lock-wait` to wait for transient store locks before failing.
+- CLI: add `--full` to disable table truncation; piped output now keeps full message IDs. (#13 — thanks @rickhallett)
+- Diagnostics: show linked JID and local store counts in `auth status` and `doctor`. (#149 — thanks @draix)
+- Messages: add `messages list --sender`, `--from-me`, `--from-them`, and `--asc` filters. (#153 — thanks @draix)
+- Messages: add `messages search --has-media`, `--type text`, case-insensitive media types, and validation for contradictory filters. (#128 — thanks @ImLukeF and @Mansehej)
+- Messages: extract searchable/display text from WhatsApp Business templates, buttons, interactive messages, and list replies. (#79 — thanks @terry-li-hm)
+
+### Security
+
+- Auth: reject `?` and `#` in whatsmeow session store paths to avoid SQLite URI parameter injection. (#180 — thanks @shaun0927)
+- Store: restrict index and session SQLite database files to owner-only permissions. (#147 — thanks @draix)
+
+### Fixed
+
+- Groups: hide groups after `groups leave`, mark missing joined groups as left during refresh, and show them again if a later refresh reports membership. (#125, #129 — thanks @SeifBenayed and @ImLukeF)
+- History: cap on-demand backfill at 500 messages per request and 100 requests per run.
+- Messages: normalize device-specific `@s.whatsapp.net` JIDs before storing chats, contacts, and senders.
+- Doctor: report lock owner PID and distinguish paired stores locked by another process. (#105 — thanks @artemgetmann)
+- Media: recover panics per download job so one bad payload no longer drains the worker pool. (#179 — thanks @shaun0927)
+- Messages: attribute history messages from LID-addressed groups to the top-level participant sender. (#19 — thanks @entropyy0)
+- Messages: show display text for replies, reactions, and media in `messages context`. (#183 — thanks @fuleinist)
+- Send: strip a leading `+` from phone-number recipients before building WhatsApp JIDs. (#74 — thanks @FrederickStempfle)
+- Search: keep FTS5 enabled after reopening existing databases with already-applied migrations. (#185 — thanks @iamhitarth)
+- Send: add `send text --reply-to` for quoted replies, with sender inference for synced group messages. (#154 — thanks @draix)
+- Send: bound send attempts and reconnect once for stale-session/time-out failures instead of hanging indefinitely. (#115 — thanks @0xatrilla)
+- Send: persist retry-message plaintext so linked devices can decrypt retried messages. (#186 — thanks @SimDamDev)
+- Store: use the XDG state directory on Linux by default, while keeping existing `~/.wacli` stores working. (#172, #164 — thanks @txhno)
+- Sync: keep `sync --once` idle timing focused on message/history events so connection chatter cannot hang exit. (#119 — thanks @jyothepro)
+- Sync: start `sync --once` idle timing after the `Connected` event. (#171 — thanks @fuleinist)
+- Sync: include event type, stack trace, and recovery count when logging recovered event-handler panics. (#181 — thanks @shaun0927)
+- Sync: apply bounded backpressure to media download enqueueing instead of spawning unbounded overflow goroutines. (#121 — thanks @jyothepro)
+- Windows: split store locking by platform so the lock package compiles on Windows. (#188 — thanks @dinakars777)
+
+### Docs
+
+- Maintainers: add CODEOWNERS and maintainer contact info.
+
+### Chore
+
+- CI: compile-test the Windows lock package to catch platform regressions. (#188 — thanks @dinakars777)
+- Dependencies: update Go modules including `whatsmeow`, `go-sqlite3`, `x/*`, and related runtime libs.
+- Refactor: split WhatsApp message parsing into focused text, media, business, and context helpers.
+- Refactor: inject clocks in app/store paths for deterministic tests.
+- Version: bump CLI version string to `0.7.0`.
+
+## 0.6.0 - 2026-04-14
+
+### Security
+
+- Search: sanitize FTS5 user queries and escape LIKE wildcards to avoid query-syntax injection.
+- Store: reject SQLite URI path injection via `?` and `#`, guard empty table names, and strip null/control chars from sanitized paths.
+- Sync: recover panics in event handlers and media workers instead of crashing the process.
+
+### Fixed
+
+- Sync: bound reconnect duration so long-running commands do not hold the store lock forever.
+- CLI: force exit on a second SIGINT during long-running commands.
 
 ### Added
 
-- TBD.
+- Store: add `WACLI_STORE_DIR` to configure the default store directory.
+
+### Chore
+
+- Dependencies: bump `filippo.io/edwards25519`.
+
+## 0.5.0 - 2026-04-12
+
+### Fixed
+
+- WhatsApp connectivity: update `whatsmeow` for the current WhatsApp protocol and fix `405 (Client Outdated)` failures.
+
+### Changed
+
+- Internal architecture: split store and groups command logic into focused modules for cleaner maintenance and safer follow-up changes.
+- Dependencies: bump core Go modules including `whatsmeow`, `go-sqlite3`, and `x/*` runtime libs.
+
+### Build
+
+- CI: extract a shared setup action and reuse it across CI and release workflows.
+- Release: install arm64 libc headers in release workflow to improve ARM build reliability.
+
+### Docs
+
+- README: update usage/docs for the 0.2.0 release baseline.
+- Changelog: sync unreleased notes with all commits since `v0.2.0`.
+
+### Chore
+
+- Version: bump CLI version string to `0.5.0`.
 
 ## 0.2.0 - 2026-01-23
 
@@ -23,7 +123,18 @@
 
 - Release: multi-OS GoReleaser configs and workflow for macOS, linux, and windows artifacts.
 
-## 0.1.0 - 2026-01-01
+### Docs
+
+- Install: clarify Homebrew vs local build paths.
+- Changelog: introduce project changelog and prep `0.2.0` release notes.
+
+## 0.1.1 - 2025-12-12
+
+### Fixed
+
+- Release: fix workflow for CGO builds.
+
+## 0.1.0 - 2025-12-12
 
 ### Added
 

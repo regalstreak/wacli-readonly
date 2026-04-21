@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"github.com/steipete/wacli/internal/store"
 	"github.com/steipete/wacli/internal/wa"
 	"go.mau.fi/whatsmeow/types"
-	"go.mau.fi/whatsmeow/types/events"
 )
 
 type SyncMode string
@@ -31,6 +29,7 @@ type SyncOptions struct {
 	RefreshContacts bool
 	RefreshGroups   bool
 	IdleExit        time.Duration // only used for bootstrap/once
+	MaxReconnect    time.Duration // max time to attempt reconnection before giving up (0 = unlimited)
 	Verbosity       int           // future
 }
 
@@ -52,7 +51,7 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 
 	var messagesStored atomic.Int64
 	lastEvent := atomic.Int64{}
-	lastEvent.Store(time.Now().UTC().UnixNano())
+	lastEvent.Store(nowUTC().UnixNano())
 
 	disconnected := make(chan struct{}, 1)
 
@@ -61,90 +60,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	enqueueMedia := func(chatJID, msgID string) {}
 	if opts.DownloadMedia {
 		mediaJobs = make(chan mediaJob, 512)
-		enqueueMedia = func(chatJID, msgID string) {
-			if strings.TrimSpace(chatJID) == "" || strings.TrimSpace(msgID) == "" {
-				return
-			}
-			select {
-			case mediaJobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
-			default:
-				// Avoid blocking the event handler.
-				go func() {
-					select {
-					case mediaJobs <- mediaJob{chatJID: chatJID, msgID: msgID}:
-					case <-ctx.Done():
-					}
-				}()
-			}
-		}
+		enqueueMedia = newMediaEnqueuer(ctx, mediaJobs)
 	}
 
-	handlerID := a.wa.AddEventHandler(func(evt interface{}) {
-		lastEvent.Store(time.Now().UTC().UnixNano())
-
-		switch v := evt.(type) {
-		case *events.Message:
-			pm := wa.ParseLiveMessage(v)
-			if pm.ReactionToID != "" && pm.ReactionEmoji == "" && v.Message != nil && v.Message.GetEncReactionMessage() != nil {
-				if reaction, err := a.wa.DecryptReaction(ctx, v); err == nil && reaction != nil {
-					pm.ReactionEmoji = reaction.GetText()
-					if pm.ReactionToID == "" {
-						if key := reaction.GetKey(); key != nil {
-							pm.ReactionToID = key.GetID()
-						}
-					}
-				}
-			}
-			if err := a.storeParsedMessage(ctx, pm); err == nil {
-				messagesStored.Add(1)
-			}
-			if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
-				enqueueMedia(pm.Chat.String(), pm.ID)
-			}
-			if messagesStored.Load()%25 == 0 {
-				fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
-			}
-		case *events.HistorySync:
-			fmt.Fprintf(os.Stderr, "\nProcessing history sync (%d conversations)...\n", len(v.Data.Conversations))
-			for _, conv := range v.Data.Conversations {
-				lastEvent.Store(time.Now().UTC().UnixNano())
-				chatID := strings.TrimSpace(conv.GetID())
-				if chatID == "" {
-					continue
-				}
-				for _, m := range conv.Messages {
-					lastEvent.Store(time.Now().UTC().UnixNano())
-					if m.Message == nil {
-						continue
-					}
-					pm := wa.ParseHistoryMessage(chatID, m.Message)
-					if pm.ID == "" || pm.Chat.IsEmpty() {
-						continue
-					}
-					if err := a.storeParsedMessage(ctx, pm); err == nil {
-						messagesStored.Add(1)
-					}
-					if opts.DownloadMedia && pm.Media != nil && pm.ID != "" {
-						enqueueMedia(pm.Chat.String(), pm.ID)
-					}
-				}
-			}
-			fmt.Fprintf(os.Stderr, "\rSynced %d messages...", messagesStored.Load())
-		case *events.Connected:
-			fmt.Fprintln(os.Stderr, "\nConnected.")
-		case *events.Disconnected:
-			fmt.Fprintln(os.Stderr, "\nDisconnected.")
-			select {
-			case disconnected <- struct{}{}:
-			default:
-			}
-		}
-	})
+	handlerID := a.addSyncEventHandler(ctx, opts, &messagesStored, &lastEvent, disconnected, enqueueMedia)
 	defer a.wa.RemoveEventHandler(handlerID)
-
-	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {
-		return SyncResult{}, err
-	}
 
 	if opts.DownloadMedia {
 		var err error
@@ -154,6 +74,11 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 		}
 		defer stopMedia()
 	}
+
+	if err := a.Connect(ctx, opts.AllowQR, opts.OnQRCode); err != nil {
+		return SyncResult{}, err
+	}
+	lastEvent.Store(nowUTC().UnixNano())
 
 	// Optional: bootstrap imports (helps contacts/groups management without waiting for events).
 	if opts.RefreshContacts {
@@ -169,45 +94,10 @@ func (a *App) Sync(ctx context.Context, opts SyncOptions) (SyncResult, error) {
 	}
 
 	if opts.Mode == SyncModeFollow {
-		for {
-			select {
-			case <-ctx.Done():
-				fmt.Fprintln(os.Stderr, "\nStopping sync.")
-				return SyncResult{MessagesStored: messagesStored.Load()}, nil
-			case <-disconnected:
-				fmt.Fprintln(os.Stderr, "Reconnecting...")
-				if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
-					return SyncResult{MessagesStored: messagesStored.Load()}, err
-				}
-			}
-		}
+		return a.runSyncFollow(ctx, opts.MaxReconnect, &messagesStored, disconnected)
 	}
 
-	// Bootstrap/once: exit after idle.
-	poll := 250 * time.Millisecond
-	if opts.IdleExit >= 2*time.Second {
-		poll = 1 * time.Second
-	}
-	ticker := time.NewTicker(poll)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Fprintln(os.Stderr, "\nStopping sync.")
-			return SyncResult{MessagesStored: messagesStored.Load()}, nil
-		case <-disconnected:
-			fmt.Fprintln(os.Stderr, "Reconnecting...")
-			if err := a.wa.ReconnectWithBackoff(ctx, 2*time.Second, 30*time.Second); err != nil {
-				return SyncResult{MessagesStored: messagesStored.Load()}, err
-			}
-		case <-ticker.C:
-			last := time.Unix(0, lastEvent.Load())
-			if time.Since(last) >= opts.IdleExit {
-				fmt.Fprintf(os.Stderr, "\nIdle for %s, exiting.\n", opts.IdleExit)
-				return SyncResult{MessagesStored: messagesStored.Load()}, nil
-			}
-		}
-	}
+	return a.runSyncUntilIdle(ctx, opts.IdleExit, opts.MaxReconnect, &messagesStored, &lastEvent, disconnected)
 }
 
 func chatKind(chat types.JID) string {
@@ -224,7 +114,7 @@ func chatKind(chat types.JID) string {
 }
 
 func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error {
-	chatJID := pm.Chat.String()
+	chatJID := canonicalJIDString(pm.Chat)
 	chatName := a.wa.ResolveChatName(ctx, pm.Chat, pm.PushName)
 	if err := a.db.UpsertChat(chatJID, chatKind(pm.Chat), chatName, pm.Timestamp); err != nil {
 		return err
@@ -232,10 +122,11 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 
 	// Best-effort: store contact info for DMs.
 	if pm.Chat.Server == types.DefaultUserServer {
-		if info, err := a.wa.GetContact(ctx, pm.Chat.ToNonAD()); err == nil {
+		chat := canonicalJID(pm.Chat)
+		if info, err := a.wa.GetContact(ctx, chat); err == nil {
 			_ = a.db.UpsertContact(
-				pm.Chat.String(),
-				pm.Chat.User,
+				chat.String(),
+				chat.User,
 				info.PushName,
 				info.FullName,
 				info.FirstName,
@@ -250,15 +141,18 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 	} else if s := strings.TrimSpace(pm.PushName); s != "" && s != "-" {
 		senderName = s
 	}
+	senderJID := pm.SenderJID
 	if pm.SenderJID != "" {
 		if jid, err := types.ParseJID(pm.SenderJID); err == nil {
-			if info, err := a.wa.GetContact(ctx, jid.ToNonAD()); err == nil {
+			contactJID := canonicalJID(jid)
+			senderJID = contactJID.String()
+			if info, err := a.wa.GetContact(ctx, contactJID); err == nil {
 				if name := wa.BestContactName(info); name != "" {
 					senderName = name
 				}
 				_ = a.db.UpsertContact(
-					jid.String(),
-					jid.User,
+					contactJID.String(),
+					contactJID.User,
 					info.PushName,
 					info.FullName,
 					info.FirstName,
@@ -282,7 +176,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 				}
 				ps = append(ps, store.GroupParticipant{
 					GroupJID: pm.Chat.String(),
-					UserJID:  p.JID.String(),
+					UserJID:  canonicalJIDString(p.JID),
 					Role:     role,
 				})
 			}
@@ -311,7 +205,7 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 		ChatJID:       chatJID,
 		ChatName:      chatName,
 		MsgID:         pm.ID,
-		SenderJID:     pm.SenderJID,
+		SenderJID:     senderJID,
 		SenderName:    senderName,
 		Timestamp:     pm.Timestamp,
 		FromMe:        pm.FromMe,

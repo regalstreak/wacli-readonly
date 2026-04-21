@@ -2,7 +2,6 @@ package wa
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"os"
 	"strings"
@@ -12,10 +11,8 @@ import (
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
-	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
 type Options struct {
@@ -33,36 +30,15 @@ func New(opts Options) (*Client, error) {
 	if strings.TrimSpace(opts.StorePath) == "" {
 		return nil, fmt.Errorf("StorePath is required")
 	}
+	// Reject paths that could inject SQLite URI parameters (#177, mirror of #59).
+	if strings.ContainsAny(opts.StorePath, "?#") {
+		return nil, fmt.Errorf("StorePath must not contain '?' or '#'")
+	}
 	c := &Client{opts: opts}
 	if err := c.init(); err != nil {
 		return nil, err
 	}
 	return c, nil
-}
-
-func (c *Client) init() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	ctx := context.Background()
-	dbLog := waLog.Stdout("Database", "ERROR", true)
-	container, err := sqlstore.New(ctx, "sqlite3", fmt.Sprintf("file:%s?_foreign_keys=on", c.opts.StorePath), dbLog)
-	if err != nil {
-		return fmt.Errorf("open whatsmeow store: %w", err)
-	}
-
-	deviceStore, err := container.GetFirstDevice(ctx)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			deviceStore = container.NewDevice()
-		} else {
-			return fmt.Errorf("get device store: %w", err)
-		}
-	}
-
-	logger := waLog.Stdout("Client", "ERROR", true)
-	c.client = whatsmeow.NewClient(deviceStore, logger)
-	return nil
 }
 
 func (c *Client) Close() {
@@ -77,6 +53,15 @@ func (c *Client) IsAuthed() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.client != nil && c.client.Store != nil && c.client.Store.ID != nil
+}
+
+func (c *Client) LinkedJID() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.client == nil || c.client.Store == nil || c.client.Store.ID == nil {
+		return ""
+	}
+	return c.client.Store.ID.ToNonAD().String()
 }
 
 func (c *Client) IsConnected() bool {
@@ -178,6 +163,11 @@ func (c *Client) SendProtoMessage(ctx context.Context, to types.JID, msg *waProt
 	return "", fmt.Errorf("send operations disabled in read-only build")
 }
 
+// SendReaction is disabled in the read-only build.
+func (c *Client) SendReaction(ctx context.Context, chat, sender types.JID, targetID types.MessageID, reaction string) (types.MessageID, error) {
+	return "", fmt.Errorf("send operations disabled in read-only build")
+}
+
 // Upload is disabled in the read-only build.
 func (c *Client) Upload(ctx context.Context, data []byte, mediaType whatsmeow.MediaType) (whatsmeow.UploadResponse, error) {
 	return whatsmeow.UploadResponse{}, fmt.Errorf("upload operations disabled in read-only build")
@@ -221,21 +211,6 @@ func (c *Client) RequestHistorySyncOnDemand(ctx context.Context, lastKnown types
 		return "", err
 	}
 	return resp.ID, nil
-}
-
-func ParseUserOrJID(s string) (types.JID, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return types.JID{}, fmt.Errorf("recipient is required")
-	}
-	if strings.Contains(s, "@") {
-		return types.ParseJID(s)
-	}
-	return types.JID{User: s, Server: types.DefaultUserServer}, nil
-}
-
-func IsGroupJID(jid types.JID) bool {
-	return jid.Server == types.GroupServer
 }
 
 func (c *Client) GetContact(ctx context.Context, jid types.JID) (types.ContactInfo, error) {
@@ -313,6 +288,11 @@ func (c *Client) GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupI
 		return nil, fmt.Errorf("not connected")
 	}
 	return cli.GetGroupInfo(ctx, jid)
+}
+
+// SendChatPresence is disabled in the read-only build.
+func (c *Client) SendChatPresence(ctx context.Context, jid types.JID, state types.ChatPresence, media types.ChatPresenceMedia) error {
+	return fmt.Errorf("presence operations disabled in read-only build")
 }
 
 func (c *Client) Logout(ctx context.Context) error {

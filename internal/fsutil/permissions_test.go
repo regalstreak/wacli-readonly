@@ -1,0 +1,54 @@
+package fsutil
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestEnsurePrivateDirCreatesAndChmods(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := EnsurePrivateDir(dir); err != nil {
+		t.Fatalf("EnsurePrivateDir: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatalf("expected directory")
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("mode = %04o, want 0700", got)
+	}
+}
+
+func TestEnsurePrivateDirFixesExistingPerms(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatalf("Chmod setup: %v", err)
+	}
+	if err := EnsurePrivateDir(dir); err != nil {
+		t.Fatalf("EnsurePrivateDir: %v", err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("mode = %04o, want 0700", got)
+	}
+}
+
+func TestEnsurePrivateDirRejectsFiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := EnsurePrivateDir(path); err == nil {
+		t.Fatalf("expected error for file path")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/steipete/wacli/internal/fsutil"
 	"go.mau.fi/whatsmeow"
 )
 
@@ -43,7 +44,7 @@ func (c *Client) DownloadMediaToFile(ctx context.Context, directPath string, enc
 		return 0, err
 	}
 
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0700); err != nil {
+	if err := fsutil.EnsurePrivateDir(filepath.Dir(targetPath)); err != nil {
 		return 0, fmt.Errorf("create output dir: %w", err)
 	}
 

@@ -1,11 +1,8 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -37,7 +34,7 @@ func newHistoryBackfillCmd(flags *rootFlags) *cobra.Command {
 				return fmt.Errorf("--chat is required")
 			}
 
-			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			ctx, stop := signalContext()
 			defer stop()
 
 			a, lk, err := newApp(ctx, flags, true, false)
@@ -73,8 +70,8 @@ func newHistoryBackfillCmd(flags *rootFlags) *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&chat, "chat", "", "chat JID")
-	cmd.Flags().IntVar(&count, "count", 50, "number of messages to request per on-demand sync (recommended: 50)")
-	cmd.Flags().IntVar(&requests, "requests", 1, "number of on-demand requests to attempt")
+	cmd.Flags().IntVar(&count, "count", app.DefaultBackfillCount, "number of messages to request per on-demand sync")
+	cmd.Flags().IntVar(&requests, "requests", app.DefaultBackfillRequests, "number of on-demand requests to attempt")
 	cmd.Flags().DurationVar(&wait, "wait", 60*time.Second, "time to wait for an on-demand response per request")
 	cmd.Flags().DurationVar(&idleExit, "idle-exit", 5*time.Second, "exit after being idle (after backfill requests)")
 	return cmd

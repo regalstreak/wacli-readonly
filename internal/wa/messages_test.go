@@ -32,6 +32,45 @@ func TestParseHistoryMessageTextAndSender(t *testing.T) {
 	}
 }
 
+func TestParseHistoryMessageTopLevelParticipant(t *testing.T) {
+	groupJID := "120363001234567890@g.us"
+	senderLID := "12345:67@lid"
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:        proto.String("msgid2"),
+			FromMe:    proto.Bool(false),
+			RemoteJID: proto.String(groupJID),
+		},
+		Participant:      proto.String(senderLID),
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC).Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("from lid group")},
+	}
+
+	pm := ParseHistoryMessage(groupJID, h)
+	if pm.SenderJID != senderLID {
+		t.Fatalf("SenderJID = %q, want %q", pm.SenderJID, senderLID)
+	}
+}
+
+func TestParseHistoryMessageKeyParticipantStillWorks(t *testing.T) {
+	sender := "sender@s.whatsapp.net"
+	h := &waProto.WebMessageInfo{
+		Key: &waProto.MessageKey{
+			ID:          proto.String("msgid3"),
+			FromMe:      proto.Bool(false),
+			RemoteJID:   proto.String("120363001234567890@g.us"),
+			Participant: proto.String(sender),
+		},
+		MessageTimestamp: proto.Uint64(uint64(time.Date(2024, 6, 1, 0, 0, 0, 0, time.UTC).Unix())),
+		Message:          &waProto.Message{Conversation: proto.String("from regular group")},
+	}
+
+	pm := ParseHistoryMessage("120363001234567890@g.us", h)
+	if pm.SenderJID != sender {
+		t.Fatalf("SenderJID = %q, want %q", pm.SenderJID, sender)
+	}
+}
+
 func TestParseLiveMessageImageClonesBytes(t *testing.T) {
 	chat, _ := types.ParseJID("123@s.whatsapp.net")
 	sender, _ := types.ParseJID("sender@s.whatsapp.net")
@@ -138,5 +177,252 @@ func TestParseLiveMessageReply(t *testing.T) {
 	}
 	if pm.ReplyToDisplay != "quoted" {
 		t.Fatalf("expected ReplyToDisplay to be quoted, got %q", pm.ReplyToDisplay)
+	}
+}
+
+func TestParseTemplateMessage(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("biz@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat: chat, Sender: sender, IsFromMe: false,
+			},
+			ID:        "tmpl1",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			TemplateMessage: &waProto.TemplateMessage{
+				HydratedTemplate: &waProto.TemplateMessage_HydratedFourRowTemplate{
+					HydratedContentText: proto.String("Your appointment is confirmed"),
+					HydratedFooterText:  proto.String("Reply STOP to opt out"),
+				},
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if pm.Text != "Your appointment is confirmed\n[Reply STOP to opt out]" {
+		t.Fatalf("unexpected template text: %q", pm.Text)
+	}
+}
+
+func TestParseButtonsMessage(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("biz@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat: chat, Sender: sender, IsFromMe: false,
+			},
+			ID:        "btn1",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			ButtonsMessage: &waProto.ButtonsMessage{
+				ContentText: proto.String("Pick an option"),
+				FooterText:  proto.String("Powered by Biz"),
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if pm.Text != "Pick an option\n[Powered by Biz]" {
+		t.Fatalf("unexpected buttons text: %q", pm.Text)
+	}
+}
+
+func TestParseButtonsResponseMessage(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("user@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat: chat, Sender: sender, IsFromMe: true,
+			},
+			ID:        "btnresp1",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			ButtonsResponseMessage: &waProto.ButtonsResponseMessage{
+				Response: &waProto.ButtonsResponseMessage_SelectedDisplayText{
+					SelectedDisplayText: "Option A",
+				},
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if pm.Text != "Option A" {
+		t.Fatalf("unexpected buttons response text: %q", pm.Text)
+	}
+}
+
+func TestParseInteractiveMessage(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("biz@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat: chat, Sender: sender, IsFromMe: false,
+			},
+			ID:        "interactive1",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			InteractiveMessage: &waProto.InteractiveMessage{
+				Header: &waProto.InteractiveMessage_Header{
+					Title:    proto.String("Welcome"),
+					Subtitle: proto.String("sub"),
+				},
+				Body: &waProto.InteractiveMessage_Body{
+					Text: proto.String("Browse our catalog"),
+				},
+				Footer: &waProto.InteractiveMessage_Footer{
+					Text: proto.String("Terms apply"),
+				},
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if pm.Text != "Welcome\nBrowse our catalog\n[Terms apply]" {
+		t.Fatalf("unexpected interactive text: %q", pm.Text)
+	}
+}
+
+func TestParseListMessage(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("biz@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat: chat, Sender: sender, IsFromMe: false,
+			},
+			ID:        "list1",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			ListMessage: &waProto.ListMessage{
+				Title:       proto.String("Menu"),
+				Description: proto.String("Choose an item"),
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if pm.Text != "Menu\nChoose an item" {
+		t.Fatalf("unexpected list text: %q", pm.Text)
+	}
+}
+
+func TestParseListResponseMessage(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("user@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat: chat, Sender: sender, IsFromMe: true,
+			},
+			ID:        "listresp1",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			ListResponseMessage: &waProto.ListResponseMessage{
+				Title: proto.String("Item B"),
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if pm.Text != "Item B" {
+		t.Fatalf("unexpected list response text: %q", pm.Text)
+	}
+}
+
+func TestParseTemplateButtonReplyMessage(t *testing.T) {
+	chat, _ := types.ParseJID("123@s.whatsapp.net")
+	sender, _ := types.ParseJID("user@s.whatsapp.net")
+
+	ev := &events.Message{
+		Info: types.MessageInfo{
+			MessageSource: types.MessageSource{
+				Chat: chat, Sender: sender, IsFromMe: true,
+			},
+			ID:        "tbreply1",
+			Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		},
+		Message: &waProto.Message{
+			TemplateButtonReplyMessage: &waProto.TemplateButtonReplyMessage{
+				SelectedDisplayText: proto.String("Book now"),
+			},
+		},
+	}
+
+	pm := ParseLiveMessage(ev)
+	if pm.Text != "Book now" {
+		t.Fatalf("unexpected template button reply text: %q", pm.Text)
+	}
+}
+
+func TestDisplayTextForProtoBusinessTypes(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  *waProto.Message
+		want string
+	}{
+		{
+			name: "template",
+			msg: &waProto.Message{
+				TemplateMessage: &waProto.TemplateMessage{
+					HydratedTemplate: &waProto.TemplateMessage_HydratedFourRowTemplate{
+						HydratedContentText: proto.String("body text"),
+					},
+				},
+			},
+			want: "body text",
+		},
+		{
+			name: "buttons",
+			msg: &waProto.Message{
+				ButtonsMessage: &waProto.ButtonsMessage{
+					ContentText: proto.String("pick one"),
+				},
+			},
+			want: "pick one",
+		},
+		{
+			name: "interactive",
+			msg: &waProto.Message{
+				InteractiveMessage: &waProto.InteractiveMessage{
+					Body: &waProto.InteractiveMessage_Body{Text: proto.String("shop here")},
+				},
+			},
+			want: "shop here",
+		},
+		{
+			name: "list",
+			msg: &waProto.Message{
+				ListMessage: &waProto.ListMessage{
+					Description: proto.String("choose"),
+				},
+			},
+			want: "choose",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := displayTextForProto(tc.msg)
+			if got != tc.want {
+				t.Fatalf("displayTextForProto(%s) = %q, want %q", tc.name, got, tc.want)
+			}
+		})
 	}
 }

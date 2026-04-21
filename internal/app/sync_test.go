@@ -2,9 +2,12 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"testing"
 	"time"
 
+	"github.com/steipete/wacli/internal/wa"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
@@ -82,6 +85,43 @@ func TestSyncStoresLiveAndHistoryMessages(t *testing.T) {
 	}
 	if n, err := a.db.CountMessages(); err != nil || n != 2 {
 		t.Fatalf("expected 2 messages in DB, got %d (err=%v)", n, err)
+	}
+}
+
+func TestStoreParsedMessageNormalizesDefaultUserADJIDs(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	chat := types.JID{User: "123:4", Server: types.DefaultUserServer}
+	sender := types.JID{User: "456:7", Server: types.DefaultUserServer}
+	f.contacts[chat.ToNonAD()] = types.ContactInfo{Found: true, FullName: "Alice"}
+	f.contacts[sender.ToNonAD()] = types.ContactInfo{Found: true, FullName: "Bob"}
+
+	err := a.storeParsedMessage(context.Background(), wa.ParsedMessage{
+		Chat:      chat,
+		ID:        "m-normalized",
+		SenderJID: sender.String(),
+		Timestamp: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		Text:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("storeParsedMessage: %v", err)
+	}
+
+	msg, err := a.db.GetMessage(chat.ToNonAD().String(), "m-normalized")
+	if err != nil {
+		t.Fatalf("GetMessage canonical chat: %v", err)
+	}
+	if msg.ChatJID != chat.ToNonAD().String() {
+		t.Fatalf("ChatJID = %q, want %q", msg.ChatJID, chat.ToNonAD().String())
+	}
+	wantSender, err := types.ParseJID(sender.String())
+	if err != nil {
+		t.Fatalf("ParseJID sender: %v", err)
+	}
+	if msg.SenderJID != wantSender.ToNonAD().String() {
+		t.Fatalf("SenderJID = %q, want %q", msg.SenderJID, wantSender.ToNonAD().String())
 	}
 }
 
@@ -235,6 +275,71 @@ func TestSyncStoresDisplayText(t *testing.T) {
 	}
 }
 
+func TestSyncMediaEnqueueUsesBoundedBackpressure(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+	f.downloadDelay = 5 * time.Millisecond
+
+	chat := types.JID{User: "123", Server: types.DefaultUserServer}
+	f.contacts[chat.ToNonAD()] = types.ContactInfo{
+		Found:    true,
+		FullName: "Alice",
+		PushName: "Alice",
+	}
+
+	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 600; i++ {
+		f.connectEvents = append(f.connectEvents, &events.Message{
+			Info: types.MessageInfo{
+				MessageSource: types.MessageSource{
+					Chat:     chat,
+					Sender:   chat,
+					IsFromMe: false,
+				},
+				ID:        fmt.Sprintf("media-%03d", i),
+				Timestamp: base.Add(time.Duration(i) * time.Second),
+				PushName:  "Alice",
+			},
+			Message: &waProto.Message{
+				ImageMessage: &waProto.ImageMessage{
+					Mimetype:      proto.String("image/jpeg"),
+					DirectPath:    proto.String("/direct"),
+					MediaKey:      []byte{1},
+					FileSHA256:    []byte{2},
+					FileEncSHA256: []byte{3},
+					FileLength:    proto.Uint64(10),
+				},
+			},
+		})
+	}
+
+	before := runtime.NumGoroutine()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var during int
+	res, err := a.Sync(ctx, SyncOptions{
+		Mode:          SyncModeFollow,
+		AllowQR:       false,
+		DownloadMedia: true,
+		AfterConnect: func(context.Context) error {
+			during = runtime.NumGoroutine()
+			cancel()
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if res.MessagesStored != 600 {
+		t.Fatalf("expected 600 messages stored, got %d", res.MessagesStored)
+	}
+	if leaked := during - before; leaked > 20 {
+		t.Fatalf("expected bounded media enqueue goroutines, saw +%d (before=%d during=%d)", leaked, before, during)
+	}
+}
+
 func TestSyncOnceIdleExit(t *testing.T) {
 	a := newTestApp(t)
 	f := newFakeWA()
@@ -254,5 +359,63 @@ func TestSyncOnceIdleExit(t *testing.T) {
 	}
 	if time.Since(start) > 1500*time.Millisecond {
 		t.Fatalf("expected to exit quickly on idle, took %s", time.Since(start))
+	}
+}
+
+func TestSyncOnceIdleExitIgnoresNonMessageEvents(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	a.wa = f
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	go func() {
+		ticker := time.NewTicker(30 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				f.emit(&events.Connected{})
+			}
+		}
+	}()
+
+	start := time.Now()
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:     SyncModeOnce,
+		AllowQR:  false,
+		IdleExit: 200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 1500*time.Millisecond {
+		t.Fatalf("expected non-message events not to reset idle timer, took %s", elapsed)
+	}
+}
+
+func TestSyncOnceIdleExitStartsAfterConnected(t *testing.T) {
+	a := newTestApp(t)
+	f := newFakeWA()
+	f.connectDelay = 400 * time.Millisecond
+	a.wa = f
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	_, err := a.Sync(ctx, SyncOptions{
+		Mode:     SyncModeOnce,
+		AllowQR:  false,
+		IdleExit: 600 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < f.connectDelay+600*time.Millisecond {
+		t.Fatalf("expected idle timer to start after connect, exited after %s", elapsed)
 	}
 }
